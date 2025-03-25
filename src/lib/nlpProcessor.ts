@@ -1,23 +1,8 @@
 import { DatabaseTable, DatabaseColumn } from "@/types/database";
 import { GemmaService } from "./gemmaService";
 
-class GemmaService {
-	async generateSQL(query: string, tables: DatabaseTable[]): Promise<string> {
-		// This is a placeholder implementation
-		// In a real implementation, you would call the Gemma API here
-
-		// For now, throw an error to force fallback to rule-based approach
-		throw new Error("Gemma API not implemented");
-	}
-
-	async explainSQL(sql: string): Promise<string> {
-		// This is a placeholder implementation
-		// In a real implementation, you would call the Gemma API here
-
-		// For now, throw an error to force fallback to rule-based approach
-		throw new Error("Gemma API not implemented");
-	}
-}
+// Add a console log to check if the import is working
+// console.log("GemmaService imported:", GemmaService);
 
 interface QueryIntent {
 	type:
@@ -82,14 +67,25 @@ export class NLPProcessor {
 			}
 		}
 
-		// Initialize the Gemma service
+		// Initialize the Gemma service with debug logging
+		console.log("Initializing GemmaService...");
 		this.gemmaService = new GemmaService();
+		console.log("GemmaService initialized:", this.gemmaService);
 	}
 
 	public async processQuery(query: string): Promise<string> {
 		try {
+			// Add debug logging
+			console.log("GemmaService instance:", this.gemmaService);
+			console.log(
+				"Available methods:",
+				Object.getOwnPropertyNames(
+					Object.getPrototypeOf(this.gemmaService)
+				)
+			);
+
 			// Try to use Gemma to generate SQL
-			const generatedSql = await this.gemmaService.generateSQL(
+			const generatedSql = await this.gemmaService.translateToSQL(
 				query,
 				this.tables
 			);
