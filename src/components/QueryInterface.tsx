@@ -38,6 +38,7 @@ export default function QueryInterface({
 	const [tables, setTables] = useState<DatabaseTable[]>([]);
 	const [nlpProcessor, setNlpProcessor] = useState<NLPProcessor | null>(null);
 	const [explanation, setExplanation] = useState<string>("");
+	const [context, setContext] = useState<string>("");
 
 	// Initialize NLP processor when tables are loaded
 	useEffect(() => {
@@ -113,6 +114,21 @@ export default function QueryInterface({
 		setExplanation(text);
 	};
 
+	// Add this function to generate context
+	const generateQueryContext = async (queryText: string) => {
+		if (!nlpProcessor) return "";
+
+		try {
+			// Use the Gemma service to generate context
+			const queryContext =
+				await nlpProcessor.gemmaService.generateQueryContext(queryText);
+			return queryContext;
+		} catch (error) {
+			console.warn("Failed to generate query context:", error);
+			return `You asked about ${queryText}`;
+		}
+	};
+
 	const handleSubmitQuery = async (queryText: string) => {
 		setQuery(queryText);
 		setIsProcessing(true);
@@ -123,6 +139,14 @@ export default function QueryInterface({
 				throw new Error(
 					"Database schema not loaded yet. Please try again."
 				);
+			}
+
+			// Generate context for what the model understood
+			try {
+				const queryContext = await generateQueryContext(queryText);
+				setContext(queryContext);
+			} catch (contextError) {
+				console.warn("Failed to generate context:", contextError);
 			}
 
 			// Process the natural language query
@@ -219,6 +243,7 @@ export default function QueryInterface({
 								loading={isProcessing}
 								resultType={resultType}
 								explanation={explanation}
+								context={context}
 							/>
 						</div>
 					</div>

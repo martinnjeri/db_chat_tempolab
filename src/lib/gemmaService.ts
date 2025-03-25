@@ -142,4 +142,33 @@ export class GemmaService {
 
 		return context;
 	}
+
+	public async generateQueryContext(
+		naturalLanguageQuery: string
+	): Promise<string> {
+		if (!this.isConfigured) {
+			return Promise.reject("Gemini API is not configured");
+		}
+
+		try {
+			const prompt = `
+				Given this natural language query: "${naturalLanguageQuery}"
+				
+				Provide a brief, clear explanation of what you understand the user is asking for.
+				Write in first person as if you're explaining what you understood from their query.
+				Keep it to 1-2 sentences maximum.
+				
+				Example:
+				Query: "How many patients visited in January?"
+				Response: "I understand you want to know the total count of patient visits during January."
+			`;
+
+			const result = await this.model.generateContent(prompt);
+			const response = await result.response;
+			return response.text();
+		} catch (error) {
+			console.error("Gemini context generation error:", error);
+			throw error;
+		}
+	}
 }

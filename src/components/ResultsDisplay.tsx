@@ -21,6 +21,7 @@ interface ResultsDisplayProps {
 	loading?: boolean;
 	resultType?: "table" | "list" | "value" | "empty";
 	explanation?: string;
+	context?: string; // Add new prop for context
 }
 
 export default function ResultsDisplay({
@@ -29,6 +30,7 @@ export default function ResultsDisplay({
 	loading = false,
 	resultType = "empty",
 	explanation = "",
+	context = "", // Add default value
 }: ResultsDisplayProps) {
 	const [activeView, setActiveView] = useState<"table" | "json">("table");
 
@@ -76,7 +78,22 @@ export default function ResultsDisplay({
 			<Alert className="mb-4">
 				<CheckCircle2 className="h-4 w-4" />
 				<AlertTitle>Query Explanation</AlertTitle>
-				<AlertDescription>{explanation}</AlertDescription>
+				<AlertDescription className="prose prose-sm max-w-none">
+					{explanation}
+				</AlertDescription>
+			</Alert>
+		);
+	};
+
+	const renderContext = () => {
+		if (!context) return null;
+		return (
+			<Alert className="mb-4 bg-muted/50">
+				<AlertCircle className="h-4 w-4 text-primary" />
+				<AlertTitle>I understood your query as</AlertTitle>
+				<AlertDescription className="prose prose-sm max-w-none">
+					{context}
+				</AlertDescription>
 			</Alert>
 		);
 	};
@@ -116,19 +133,34 @@ export default function ResultsDisplay({
 		if (!listData.length) return renderEmpty();
 
 		return (
-			<div className="space-y-2 p-2">
-				{listData.map((item, index) => (
-					<div
-						key={index}
-						className="flex items-start gap-2 p-2 rounded-md bg-muted/50">
-						<CheckCircle2 className="h-5 w-5 text-primary mt-0.5" />
-						<p>
-							{typeof item === "string"
-								? item
-								: JSON.stringify(item)}
-						</p>
-					</div>
-				))}
+			<div className="space-y-3 p-2">
+				{listData.map((item, index) => {
+					// Format the item based on its type
+					let formattedItem = item;
+
+					if (typeof item === "object") {
+						// If it's an object, create a formatted string from its properties
+						formattedItem = Object.entries(item)
+							.map(([key, value]) => {
+								const formattedKey = key
+									.replace(/_/g, " ")
+									.replace(/\b\w/g, (l) => l.toUpperCase());
+								return `${formattedKey}: ${value}`;
+							})
+							.join(", ");
+					}
+
+					return (
+						<div
+							key={index}
+							className="flex items-start gap-3 p-3 rounded-md bg-muted/50">
+							<CheckCircle2 className="h-5 w-5 text-primary mt-0.5" />
+							<p className="text-sm leading-relaxed">
+								{formattedItem}
+							</p>
+						</div>
+					);
+				})}
 			</div>
 		);
 	};
@@ -136,15 +168,33 @@ export default function ResultsDisplay({
 	const renderValueData = () => {
 		if (!valueData) return renderEmpty();
 
+		// Format the value based on its type
+		let formattedValue = valueData;
+		let valueLabel = "Result";
+
+		// Get the first key if valueData is an object
+		const key =
+			typeof valueData === "object" ? Object.keys(valueData)[0] : null;
+
+		if (key) {
+			valueLabel = key
+				.replace(/_/g, " ")
+				.replace(/\b\w/g, (l) => l.toUpperCase());
+			formattedValue = valueData[key];
+		}
+
+		// Format numbers with commas
+		if (typeof formattedValue === "number") {
+			formattedValue = formattedValue.toLocaleString();
+		}
+
 		return (
 			<div className="flex items-center justify-center h-full">
 				<Alert className="max-w-md">
 					<CheckCircle2 className="h-4 w-4 text-primary" />
-					<AlertTitle>Query Result</AlertTitle>
-					<AlertDescription className="text-lg font-medium mt-2">
-						{typeof valueData === "string"
-							? valueData
-							: JSON.stringify(valueData)}
+					<AlertTitle>{valueLabel}</AlertTitle>
+					<AlertDescription className="text-2xl font-medium mt-2 text-center">
+						{formattedValue}
 					</AlertDescription>
 				</Alert>
 			</div>
@@ -157,6 +207,7 @@ export default function ResultsDisplay({
 
 		return (
 			<div className="space-y-4">
+				{renderContext()} {/* Add context section */}
 				{renderExplanation()}
 				{resultType === "table" ? (
 					<Tabs
