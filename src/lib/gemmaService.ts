@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { DatabaseColumn } from "@/types/database";
 
 export class GemmaService {
-	private genAI: GoogleGenerativeAI;
+	private genAI: GoogleGenerativeAI | null = null;
 	private model: any;
 	private apiKey: string;
 	private isConfigured: boolean = false;
@@ -28,8 +29,8 @@ export class GemmaService {
 				this.isConfigured = false;
 			}
 		} else {
-			console.warn(
-				"Gemini API key not configured. Using fallback approach."
+			throw new Error(
+				"Gemini API key not configured. Please set the NEXT_PUBLIC_GEMINI_API_KEY environment variable."
 			);
 		}
 	}
@@ -125,7 +126,7 @@ export class GemmaService {
 			context += "Columns:\n";
 
 			if (table.columns && Array.isArray(table.columns)) {
-				table.columns.forEach((column) => {
+				table.columns.forEach((column: DatabaseColumn) => {
 					let columnDesc = `- ${column.name} (${column.type})`;
 					if (column.isPrimaryKey) columnDesc += " PRIMARY KEY";
 					if (column.isNullable === false) columnDesc += " NOT NULL";
@@ -136,9 +137,15 @@ export class GemmaService {
 			// Add foreign key information if available
 			if (table.foreignKeys && Array.isArray(table.foreignKeys)) {
 				context += "Foreign Keys:\n";
-				table.foreignKeys.forEach((fk) => {
-					context += `- ${fk.column} references ${fk.foreignTable}.${fk.foreignColumn}\n`;
-				});
+				table.foreignKeys.forEach(
+					(fk: {
+						column: string;
+						foreignTable: string;
+						foreignColumn: string;
+					}) => {
+						context += `- ${fk.column} references ${fk.foreignTable}.${fk.foreignColumn}\n`;
+					}
+				);
 			}
 
 			context += "\n";
