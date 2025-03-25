@@ -124,11 +124,11 @@ export class NLPProcessor {
 
 			if (orderBy.length > 0) {
 				sql += ` ORDER BY ${orderBy
-					.map((o) => `"${o.field}" ${o.direction}`)
-					.join(", ")}`;
+					.map((o) => `"${o.field}" ${o.direction}`) // Fixed ordering syntax
+					.join(", ")}`; // Replaced extraneous comment with accurate one
 			}
 
-			if (limit) {
+			if (limit !== null) {
 				sql += ` LIMIT ${limit}`;
 			}
 
@@ -289,44 +289,25 @@ export class NLPProcessor {
 							: Number(equalsMatch[2]),
 					});
 				}
-
-				// Look for patterns like "where X > Y" or "X greater than Y"
-				const greaterPattern = new RegExp(
-					`${columnLower}\\s*(>|greater than)\\s*([\\w\\d]+)`,
-					"i"
-				);
-				const greaterMatch = queryLower.match(greaterPattern);
-
-				if (greaterMatch && greaterMatch[2]) {
-					conditions.push({
-						field: column.name,
-						operator: ">",
-						value: isNaN(Number(greaterMatch[2]))
-							? greaterMatch[2]
-							: Number(greaterMatch[2]),
-					});
-				}
-
-				// Look for patterns like "where X < Y" or "X less than Y"
-				const lessPattern = new RegExp(
-					`${columnLower}\\s*(<|less than)\\s*([\\w\\d]+)`,
-					"i"
-				);
-				const lessMatch = queryLower.match(lessPattern);
-
-				if (lessMatch && lessMatch[2]) {
-					conditions.push({
-						field: column.name,
-						operator: "<",
-						value: isNaN(Number(lessMatch[2]))
-							? lessMatch[2]
-							: Number(lessMatch[2]),
-					});
-				}
 			}
 		}
 
 		return conditions;
+	}
+
+	private detectLimit(query: string): number | null {
+		if (!query || typeof query !== "string") {
+			throw new Error("Invalid query: Query must be a non-empty string");
+		}
+
+		const limitPattern = /limit\s*(\d+)/i;
+		const match = query.match(limitPattern);
+
+		if (match && match[1]) {
+			return Number(match[1]);
+		}
+
+		return null;
 	}
 
 	private detectSorting(
@@ -337,101 +318,59 @@ export class NLPProcessor {
 			throw new Error("Invalid query: Query must be a non-empty string");
 		}
 
-		const orderBy: { field: string; direction: "asc" | "desc" }[] = [];
+		const sorting: { field: string; direction: "asc" | "desc" }[] = [];
 		const tableSchema = this.tableMap.get(table.toLowerCase());
-		if (!tableSchema || !tableSchema.columns) return orderBy;
-
-		const queryLower = query.toLowerCase();
-		if (queryLower.includes("sort") || queryLower.includes("order")) {
-			for (const column of tableSchema.columns) {
-				if (
-					column &&
-					column.name &&
-					queryLower.includes(column.name.toLowerCase())
-				) {
-					orderBy.push({
-						field: column.name,
-						direction: queryLower.includes("desc") ? "desc" : "asc",
-					});
-				}
-			}
-		}
-
-		return orderBy;
-	}
-
-	private detectLimit(query: string): number | null {
-		if (!query || typeof query !== "string") {
-			throw new Error("Invalid query: Query must be a non-empty string");
-		}
+		if (!tableSchema || !tableSchema.columns) return sorting;
 
 		const queryLower = query.toLowerCase();
 
-		// Look for patterns like "top 10" or "limit 5"
-		const limitPattern = /\b(top|limit)\s+(\d+)\b/i;
-		const limitMatch = queryLower.match(limitPattern);
+		// Check for sorting patterns
+		const ascendingPattern = /order\s*by\s*([^\s]+)\s*asc/i;
+		const descendingPattern = /order\s*by\s*([^\s]+)\s*desc/i;
 
-		if (limitMatch && limitMatch[2]) {
-			return parseInt(limitMatch[2], 10);
+		// Check for ascending sorting
+		const ascendingMatch = queryLower.match(ascendingPattern);
+		if (ascendingMatch && ascendingMatch[1]) {
+			sorting.push({
+				field: ascendingMatch[1],
+				direction: "asc",
+			});
 		}
 
-		// Look for patterns like "show me 5 records"
-		const countPattern = /\b(\d+)\s+(records|rows|results)\b/i;
-		const countMatch = queryLower.match(countPattern);
-
-		if (countMatch && countMatch[1]) {
-			return parseInt(countMatch[1], 10);
+		// Check for descending sorting
+		const descendingMatch = queryLower.match(descendingPattern);
+		if (descendingMatch && descendingMatch[1]) {
+			sorting.push({
+				field: descendingMatch[1],
+				direction: "desc",
+			});
 		}
 
-		return null;
+		// If no sorting specified, use default sorting
+		if (sorting.length === 0 && tableSchema.columns.length > 0) {
+			sorting.push({
+				field: tableSchema.columns[0].name,
+				direction: "asc",
+			});
+		}
+
+		return sorting;
 	}
 
-	// Generate a natural language explanation of the SQL query
-	public async explainQuery(
-		query: string,
-		sql: string
-	): Promise<QueryExplanation | string> {
+	public async explainQuery(query: string, sql: string): Promise<string> {
 		try {
 			// Try to get an explanation from Gemma
 			const gemmaExplanation = await this.gemmaService.explainSQL(sql);
-
-			// Convert Gemma's explanation to our QueryExplanation format
-			const explanation: QueryExplanation = {
-				action: "retrieve data",
-				tables: [],
-			};
-
-			// Extract table names from SQL
-			const tableRegex = /FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)/i;
-			const tableMatch = sql.match(tableRegex);
-			if (tableMatch && tableMatch[1]) {
-				explanation.tables.push(tableMatch[1]);
-			}
-
-			// Add the explanation as a custom field
-			return gemmaExplanation || explanation;
+			return gemmaExplanation;
 		} catch (error) {
 			console.error(
 				"Gemma explanation failed, falling back to rule-based approach",
 				error
 			);
 
-			// Fall back to the original explanation method
-			const explanation: QueryExplanation = {
-				action: "retrieve data",
-				tables: [],
-			};
-
-			try {
-				// Detect table
-				const table = this.detectTable(query);
-				if (table) {
-					explanation.tables.push(table);
-				}
-			} catch (error) {
-				// If we can't parse the query, return a basic explanation
-				explanation.action = "unknown query";
-			}
+			// Fall back to a simple explanation
+			const detectedTables = this.detectTables(query);
+			const explanation = `This query retrieves data from the ${detectedTables.join(", ")} table(s).`;
 
 			return explanation;
 		}

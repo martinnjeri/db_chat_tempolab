@@ -56,11 +56,22 @@ export default function QueryInterface({
 
 	const executeQuery = async (sqlQuery: string): Promise<QueryResult> => {
 		try {
+			// Remove trailing semicolons which cause issues with the execute_sql function
+			const cleanedQuery = sqlQuery.replace(/;$/, "");
+
 			const { data, error } = await supabase.rpc("execute_sql", {
-				sql_query: sqlQuery,
+				sql_query: cleanedQuery,
 			});
 
+			console.log("executeQuery - data:", data);
+			console.log("executeQuery - error:", error);
+
 			if (error) throw error;
+
+			// Check if data contains an error object from the function
+			if (data && data.error) {
+				return { data: null, error: { message: data.error } };
+			}
 
 			return { data, error: null };
 		} catch (error: any) {
@@ -72,8 +83,6 @@ export default function QueryInterface({
 	const setQueryResults = (result: QueryResult) => {
 		if (result.error) {
 			setError(result.error.message);
-			setResults(null);
-			setResultType("empty");
 			return;
 		}
 

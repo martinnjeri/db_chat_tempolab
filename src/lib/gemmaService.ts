@@ -71,22 +71,11 @@ export class GemmaService {
 	}
 
 	private cleanSQLResponse(text: string): string {
-		// Remove markdown code blocks if present
-		let sql = text
-			.replace(/```sql/g, "")
-			.replace(/```/g, "")
-			.trim();
+		// Remove any markdown code block formatting
+		let sql = text.replace(/```sql|```/g, "").trim();
 
-		// Remove any explanatory text before or after the SQL
-		if (sql.toLowerCase().includes("select")) {
-			const selectIndex = sql.toLowerCase().indexOf("select");
-			sql = sql.substring(selectIndex);
-
-			// Ensure the SQL ends with a semicolon
-			if (!sql.trim().endsWith(";")) {
-				sql += ";";
-			}
-		}
+		// Remove trailing semicolons which cause issues with the execute_sql function
+		sql = sql.replace(/;$/, "");
 
 		return sql;
 	}
