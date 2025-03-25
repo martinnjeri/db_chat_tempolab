@@ -1,209 +1,171 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
+	ResizableHandle,
+	ResizablePanel,
+	ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import SchemaExplorer from "./SchemaExplorer";
 import QueryInputArea from "./QueryInputArea";
 import SqlPreview from "./SqlPreview";
 import ResultsDisplay from "./ResultsDisplay";
 import { supabase } from "@/lib/supabaseClient";
+import { NLPProcessor } from "@/lib/nlpProcessor";
+import { DatabaseTable } from "@/types/database";
 
 interface QueryInterfaceProps {
-  initialQuery?: string;
+	initialQuery?: string;
 }
 
 export default function QueryInterface({
-  initialQuery = "",
+	initialQuery = "",
 }: QueryInterfaceProps) {
-  const [query, setQuery] = useState<string>(initialQuery);
-  const [sql, setSql] = useState<string>("");
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [highlightedTable, setHighlightedTable] = useState<string>("");
-  const [results, setResults] = useState<any[] | null>(null);
-  const [resultType, setResultType] = useState<
-    "table" | "list" | "value" | "empty"
-  >("empty");
-  const [error, setError] = useState<string | null>(null);
+	const [query, setQuery] = useState<string>(initialQuery);
+	const [sql, setSql] = useState<string>("");
+	const [isProcessing, setIsProcessing] = useState<boolean>(false);
+	const [highlightedTable, setHighlightedTable] = useState<string>("");
+	const [results, setResults] = useState<any[] | null>(null);
+	const [resultType, setResultType] = useState<
+		"table" | "list" | "value" | "empty"
+	>("empty");
+	const [error, setError] = useState<string | null>(null);
+	const [tables, setTables] = useState<DatabaseTable[]>([]);
+	const [nlpProcessor, setNlpProcessor] = useState<NLPProcessor | null>(null);
 
-  const handleSubmitQuery = async (queryText: string) => {
-    setQuery(queryText);
-    setIsProcessing(true);
-    setError(null);
+	// Initialize NLP processor when tables are loaded
+	useEffect(() => {
+		if (tables.length > 0) {
+			setNlpProcessor(new NLPProcessor(tables));
+		}
+	}, [tables]);
 
-    try {
-      // For now, we'll use a simple rule-based approach to generate SQL
-      // In a real app, this would be replaced with a call to Gemma or another NLP service
-      let generatedSql = "";
-      let detectedTable = "";
-      let resultFormat: "table" | "list" | "value" = "table";
+	const handleSubmitQuery = async (queryText: string) => {
+		setQuery(queryText);
+		setIsProcessing(true);
+		setError(null);
 
-      const query = queryText.toLowerCase();
+		try {
+			if (!nlpProcessor) {
+				throw new Error(
+					"Database schema not loaded yet. Please try again."
+				);
+			}
 
-      // More robust pattern matching for natural language queries
-      if (query.includes("doctor")) {
-        if (query.includes("count") || query.includes("how many")) {
-          generatedSql = "SELECT COUNT(*) as count FROM doctors;";
-          resultFormat = "value";
-        } else if (query.includes("name") && query.includes("specialty")) {
-          generatedSql = "SELECT name, specialty FROM doctors LIMIT 20;";
-        } else {
-          generatedSql = "SELECT * FROM doctors LIMIT 10;";
-        }
-        detectedTable = "doctors";
-      } else if (query.includes("patient")) {
-        if (query.includes("count") || query.includes("how many")) {
-          generatedSql = "SELECT COUNT(*) as count FROM patients;";
-          resultFormat = "value";
-        } else if (query.includes("age")) {
-          generatedSql =
-            "SELECT name, age, gender FROM patients ORDER BY age DESC LIMIT 15;";
-        } else if (query.includes("gender")) {
-          generatedSql =
-            "SELECT gender, COUNT(*) as count FROM patients GROUP BY gender;";
-          resultFormat = "table";
-        } else {
-          generatedSql = "SELECT * FROM patients LIMIT 10;";
-        }
-        detectedTable = "patients";
-      } else if (query.includes("sample") || query.includes("sample_table")) {
-        if (query.includes("count") || query.includes("how many")) {
-          generatedSql = "SELECT COUNT(*) as count FROM sample_table;";
-          resultFormat = "value";
-        } else if (query.includes("email")) {
-          generatedSql = "SELECT name, email FROM sample_table LIMIT 15;";
-        } else {
-          generatedSql = "SELECT * FROM sample_table LIMIT 10;";
-        }
-        detectedTable = "sample_table";
-      } else if (
-        query.includes("tables") ||
-        query.includes("schema") ||
-        query.includes("database structure")
-      ) {
-        generatedSql = `
-          SELECT 
-            table_name as name
-          FROM 
-            information_schema.tables 
-          WHERE 
-            table_schema = 'public' AND 
-            table_type = 'BASE TABLE'
-          ORDER BY 
-            table_name
-        `;
-        detectedTable = "";
-        resultFormat = "table";
-      } else {
-        // Default query to show available tables
-        generatedSql = `
-          SELECT 
-            table_name as name,
-            (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = t.table_name AND table_schema = 'public') as column_count
-          FROM 
-            information_schema.tables t
-          WHERE 
-            table_schema = 'public' AND 
-            table_type = 'BASE TABLE'
-          ORDER BY 
-            table_name
-        `;
-        detectedTable = "";
-        resultFormat = "table";
-      }
+			// Process the natural language query
+			let generatedSql = "";
+			try {
+				generatedSql = nlpProcessor.processQuery(queryText);
+			} catch (nlpError: any) {
+				throw new Error(`Failed to process query: ${nlpError.message}`);
+			}
 
-      setSql(generatedSql);
-      setHighlightedTable(detectedTable);
+			setSql(generatedSql);
 
-      // Execute the SQL query using Supabase with better error handling
-      try {
-        const { data, error: queryError } = await supabase.rpc("execute_sql", {
-          sql_query: generatedSql,
-        });
+			// Execute the SQL query using Supabase
+			try {
+				const { data, error: queryError } = await supabase.rpc(
+					"execute_sql",
+					{
+						sql_query: generatedSql,
+					}
+				);
 
-        if (queryError) {
-          throw new Error(`Query execution error: ${queryError.message}`);
-        }
+				if (queryError) {
+					throw new Error(
+						`Query execution error: ${queryError.message}`
+					);
+				}
 
-        if (!data) {
-          throw new Error("No data returned from query");
-        }
+				if (!data) {
+					throw new Error("No data returned from query");
+				}
 
-        // Set the results and result type
-        setResultType(resultFormat);
-        setResults(data);
-      } catch (queryErr: any) {
-        console.error("SQL execution error:", queryErr);
-        throw new Error(`Failed to execute SQL: ${queryErr.message}`);
-      }
-    } catch (err: any) {
-      setError(err.message || "Failed to process query. Please try again.");
-      console.error("Error processing query:", err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+				// Determine result type based on the query and data
+				let resultFormat: "table" | "list" | "value" = "table";
+				if (generatedSql.toLowerCase().includes("count(*)")) {
+					resultFormat = "value";
+				} else if (
+					Array.isArray(data) &&
+					data.length === 1 &&
+					Object.keys(data[0]).length === 1
+				) {
+					resultFormat = "value";
+				}
 
-  const handleTableSelect = (tableName: string) => {
-    setHighlightedTable(tableName);
-    // Optionally generate a sample query for the selected table
-    const sampleQuery = `Show me all ${tableName}`;
-    setQuery(sampleQuery);
-  };
+				setResultType(resultFormat);
+				setResults(data);
+			} catch (queryErr: any) {
+				console.error("SQL execution error:", queryErr);
+				throw new Error(`Failed to execute SQL: ${queryErr.message}`);
+			}
+		} catch (err: any) {
+			setError(
+				err.message || "Failed to process query. Please try again."
+			);
+			console.error("Error processing query:", err);
+		} finally {
+			setIsProcessing(false);
+		}
+	};
 
-  return (
-    <div className="w-full h-full bg-background flex flex-col">
-      <ResizablePanelGroup direction="horizontal" className="h-full">
-        {/* Schema Explorer Panel */}
-        <ResizablePanel
-          defaultSize={20}
-          minSize={15}
-          maxSize={30}
-          className="h-full"
-        >
-          <SchemaExplorer
-            highlightedTable={highlightedTable}
-            onTableSelect={handleTableSelect}
-          />
-        </ResizablePanel>
+	const handleTableSelect = (tableName: string) => {
+		setHighlightedTable(tableName);
+		// Generate a sample query for the selected table
+		const sampleQuery = `Show me all ${tableName}`;
+		setQuery(sampleQuery);
+	};
 
-        <ResizableHandle withHandle />
+	return (
+		<div className="w-full h-full bg-background flex flex-col">
+			<ResizablePanelGroup direction="horizontal" className="h-full">
+				{/* Schema Explorer Panel */}
+				<ResizablePanel
+					defaultSize={20}
+					minSize={15}
+					maxSize={30}
+					className="h-full">
+					<SchemaExplorer
+						highlightedTable={highlightedTable}
+						onTableSelect={handleTableSelect}
+						onTablesLoaded={setTables}
+					/>
+				</ResizablePanel>
 
-        {/* Main Content Panel */}
-        <ResizablePanel defaultSize={80} className="h-full">
-          <div className="flex flex-col h-full p-4 gap-4">
-            {/* Query Input Area */}
-            <div className="w-full">
-              <QueryInputArea
-                onSubmitQuery={handleSubmitQuery}
-                isProcessing={isProcessing}
-              />
-            </div>
+				<ResizableHandle withHandle />
 
-            {/* SQL Preview */}
-            <div className="w-full h-[150px]">
-              <SqlPreview
-                sql={sql}
-                isLoading={isProcessing}
-                error={error || ""}
-              />
-            </div>
+				{/* Main Content Panel */}
+				<ResizablePanel defaultSize={80} className="h-full">
+					<div className="flex flex-col h-full p-4 gap-4">
+						{/* Query Input Area */}
+						<div className="w-full">
+							<QueryInputArea
+								onSubmitQuery={handleSubmitQuery}
+								isProcessing={isProcessing}
+							/>
+						</div>
 
-            {/* Results Display */}
-            <div className="w-full flex-1">
-              <ResultsDisplay
-                results={results}
-                error={error}
-                loading={isProcessing}
-                resultType={resultType}
-              />
-            </div>
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
-  );
+						{/* SQL Preview */}
+						<div className="w-full h-[150px]">
+							<SqlPreview
+								sql={sql}
+								isLoading={isProcessing}
+								error={error || ""}
+							/>
+						</div>
+
+						{/* Results Display */}
+						<div className="w-full flex-1">
+							<ResultsDisplay
+								results={results}
+								error={error}
+								loading={isProcessing}
+								resultType={resultType}
+							/>
+						</div>
+					</div>
+				</ResizablePanel>
+			</ResizablePanelGroup>
+		</div>
+	);
 }
