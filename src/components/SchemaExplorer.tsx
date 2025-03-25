@@ -9,15 +9,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Database, Table, AlignJustify, RefreshCw } from "lucide-react";
+import { Database, Table, AlignJustify, Loader2 } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Button } from "./ui/button";
-import ConnectionStatus from "./ConnectionStatus";
+import { supabase } from "@/lib/supabaseClient";
 
 interface TableColumn {
   name: string;
@@ -32,130 +31,188 @@ interface DatabaseTable {
 }
 
 interface SchemaExplorerProps {
-  tables?: DatabaseTable[];
   highlightedTable?: string;
   onTableSelect?: (tableName: string) => void;
 }
 
 export default function SchemaExplorer({
-  tables = [],
   highlightedTable = "",
   onTableSelect = () => {},
 }: SchemaExplorerProps) {
-  const [loadedTables, setLoadedTables] = useState<DatabaseTable[]>(tables);
-  const [isLoading, setIsLoading] = useState<boolean>(tables.length === 0);
-  const [loadError, setLoadError] = useState<string>("");
-  const [connectionStatus, setConnectionStatus] = useState<
-    "connected" | "disconnected" | "checking"
-  >("checking");
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [tables, setTables] = useState<DatabaseTable[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [expandedTables, setExpandedTables] = useState<string[]>([]);
 
-  const refreshTables = async () => {
-    await fetchDatabaseTables();
-  };
-
-  // Function to fetch tables from Supabase
-  async function fetchDatabaseTables() {
-    try {
-      setIsLoading(true);
-      setLoadError("");
-
-      // Import the functions dynamically to avoid server-side issues
-      const { fetchTables, testConnection, getConnectionStatus } = await import(
-        "@/lib/supabaseClient"
-      );
-
-      // Test connection first
-      const connectionResult = await testConnection();
-      setConnectionStatus(
-        connectionResult.connected ? "connected" : "disconnected",
-      );
-      setConnectionError(connectionResult.error);
-
-      if (!connectionResult.connected) {
-        setLoadError("Database connection failed: " + connectionResult.error);
-        // Use fallback tables
-        setFallbackTables();
-        return;
-      }
-
-      const tablesData = await fetchTables();
-
-      if (tablesData && Array.isArray(tablesData) && tablesData.length > 0) {
-        setLoadedTables(tablesData);
-      } else {
-        // Fallback to default tables if no data is returned
-        setFallbackTables();
-      }
-    } catch (error: any) {
-      console.error("Error loading database tables:", error);
-      setConnectionStatus("disconnected");
-      setConnectionError(error.message || "Unknown error");
-      setLoadError(
-        "Failed to load database schema. Using sample data instead.",
-      );
-      // Use default tables as fallback
-      setFallbackTables();
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  // Set fallback tables when connection fails
-  const setFallbackTables = () => {
-    setLoadedTables([
-      {
-        name: "users",
-        columns: [
-          { name: "id", type: "uuid", isPrimary: true },
-          { name: "name", type: "varchar" },
-          { name: "email", type: "varchar" },
-          { name: "created_at", type: "timestamp" },
-        ],
-      },
-      {
-        name: "products",
-        columns: [
-          { name: "id", type: "uuid", isPrimary: true },
-          { name: "name", type: "varchar" },
-          { name: "price", type: "decimal" },
-          { name: "category_id", type: "uuid", isForeign: true },
-          { name: "created_at", type: "timestamp" },
-        ],
-      },
-      {
-        name: "categories",
-        columns: [
-          { name: "id", type: "uuid", isPrimary: true },
-          { name: "name", type: "varchar" },
-          { name: "description", type: "text" },
-        ],
-      },
-      {
-        name: "orders",
-        columns: [
-          { name: "id", type: "uuid", isPrimary: true },
-          { name: "user_id", type: "uuid", isForeign: true },
-          { name: "total", type: "decimal" },
-          { name: "status", type: "varchar" },
-          { name: "created_at", type: "timestamp" },
-        ],
-      },
-    ]);
-  };
-
   useEffect(() => {
-    // If tables are provided as props, use those
-    if (tables.length > 0) {
-      setLoadedTables(tables);
-      setIsLoading(false);
-      return;
+    async function fetchDatabaseSchema() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // First check if we can connect to Supabase
+        try {
+          const { data: connectionTest, error: connectionError } =
+            await supabase.rpc("execute_sql", {
+              sql_query: "SELECT 1 as connected;",
+            });
+
+          if (connectionError) {
+            throw new Error(
+              `Connection test failed: ${connectionError.message}`,
+            );
+          }
+
+          if (!connectionTest || connectionTest.length === 0) {
+            throw new Error("Connection test returned empty result");
+          }
+        } catch (connErr: any) {
+          console.error("Supabase connection error:", connErr);
+          throw new Error(`Database connection error: ${connErr.message}`);
+        }
+
+        // Fetch table information from Supabase with better error handling
+        const { data: tablesData, error: tablesError } = await supabase.rpc(
+          "execute_sql",
+          {
+            sql_query: `
+            SELECT 
+              table_name as name
+            FROM 
+              information_schema.tables 
+            WHERE 
+              table_schema = 'public' AND 
+              table_type = 'BASE TABLE'
+            ORDER BY 
+              table_name
+          `,
+          },
+        );
+
+        if (tablesError) {
+          throw new Error(`Failed to fetch tables: ${tablesError.message}`);
+        }
+
+        if (!tablesData || tablesData.length === 0) {
+          setTables([]);
+          setError(
+            "No tables found in the database. Make sure your migrations have been applied.",
+          );
+          setLoading(false);
+          return;
+        }
+
+        // For each table, fetch its columns with better error handling
+        const tablesWithColumns = await Promise.all(
+          tablesData.map(async (table: { name: string }) => {
+            try {
+              const { data: columnsData, error: columnsError } =
+                await supabase.rpc("execute_sql", {
+                  sql_query: `
+                SELECT 
+                  column_name as name, 
+                  data_type as type,
+                  CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary,
+                  CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign
+                FROM 
+                  information_schema.columns c
+                LEFT JOIN (
+                  SELECT 
+                    kcu.column_name 
+                  FROM 
+                    information_schema.table_constraints tc
+                  JOIN 
+                    information_schema.key_column_usage kcu 
+                    ON tc.constraint_name = kcu.constraint_name
+                  WHERE 
+                    tc.constraint_type = 'PRIMARY KEY' AND 
+                    tc.table_name = '${table.name}'
+                ) pk ON c.column_name = pk.column_name
+                LEFT JOIN (
+                  SELECT 
+                    kcu.column_name 
+                  FROM 
+                    information_schema.table_constraints tc
+                  JOIN 
+                    information_schema.key_column_usage kcu 
+                    ON tc.constraint_name = kcu.constraint_name
+                  WHERE 
+                    tc.constraint_type = 'FOREIGN KEY' AND 
+                    tc.table_name = '${table.name}'
+                ) fk ON c.column_name = fk.column_name
+                WHERE 
+                  c.table_name = '${table.name}' AND 
+                  c.table_schema = 'public'
+                ORDER BY 
+                  ordinal_position
+              `,
+                });
+
+              if (columnsError) {
+                console.warn(
+                  `Error fetching columns for ${table.name}:`,
+                  columnsError,
+                );
+                return {
+                  name: table.name,
+                  columns: [],
+                  error: columnsError.message,
+                };
+              }
+
+              const columns =
+                columnsData?.map((col: any) => ({
+                  name: col.name,
+                  type: col.type,
+                  isPrimary: col.is_primary,
+                  isForeign: col.is_foreign,
+                })) || [];
+
+              return {
+                name: table.name,
+                columns,
+              };
+            } catch (columnErr: any) {
+              console.error(
+                `Error processing columns for ${table.name}:`,
+                columnErr,
+              );
+              return {
+                name: table.name,
+                columns: [],
+                error: columnErr.message,
+              };
+            }
+          }),
+        );
+
+        setTables(tablesWithColumns);
+      } catch (err: any) {
+        console.error("Error fetching schema:", err);
+        setError(err.message);
+        // Set empty tables in case of error
+        setTables([]);
+      } finally {
+        setLoading(false);
+      }
     }
 
-    // Otherwise, fetch tables from Supabase
-    fetchDatabaseTables();
-  }, [tables]);
+    // Fetch schema with retry mechanism
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    const attemptFetch = () => {
+      fetchDatabaseSchema().catch((err) => {
+        console.error(`Schema fetch attempt ${retryCount + 1} failed:`, err);
+        if (retryCount < maxRetries) {
+          retryCount++;
+          setTimeout(attemptFetch, 1500); // Wait 1.5 seconds before retrying
+        }
+      });
+    };
+
+    attemptFetch();
+  }, []);
 
   const toggleTable = (tableName: string) => {
     setExpandedTables((prev) =>
@@ -169,127 +226,120 @@ export default function SchemaExplorer({
   return (
     <div className="w-full h-full bg-background border-r">
       <div className="p-4 border-b">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Schema Explorer
-          </h2>
-          <div className="flex items-center gap-2">
-            <ConnectionStatus
-              status={connectionStatus}
-              error={connectionError}
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={refreshTables}
-              disabled={isLoading}
-              className="h-7 w-7"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", isLoading && "animate-spin")}
-              />
-            </Button>
-          </div>
-        </div>
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Schema Explorer
+        </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {isLoading ? (
-            <span className="inline-flex items-center">
-              <span className="h-3 w-3 mr-2 animate-spin rounded-full border-b-2 border-primary"></span>
-              Loading tables...
-            </span>
-          ) : (
-            <>
-              {connectionStatus === "connected"
-                ? `${loadedTables.length} tables available`
-                : "Using sample data (not connected)"}
-            </>
-          )}
+          {loading ? "Loading schema..." : `${tables.length} tables available`}
         </p>
-        {loadError && <p className="text-xs text-red-500 mt-1">{loadError}</p>}
       </div>
 
       <ScrollArea className="h-[calc(100%-4rem)]">
         <div className="p-2">
-          <TooltipProvider>
-            <Accordion
-              type="multiple"
-              value={expandedTables}
-              className="w-full"
-            >
-              {loadedTables.map((table) => (
-                <AccordionItem
-                  key={table.name}
-                  value={table.name}
-                  className={cn(
-                    "border rounded-md mb-2",
-                    highlightedTable === table.name &&
-                      "border-primary bg-primary/5",
-                  )}
-                >
-                  <AccordionTrigger
-                    onClick={() => toggleTable(table.name)}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Loading database schema...
+              </p>
+            </div>
+          ) : error ? (
+            <div className="p-4 text-sm text-destructive bg-destructive/10 rounded-md">
+              <p className="font-medium">Error loading schema</p>
+              <p className="mt-1">{error}</p>
+            </div>
+          ) : tables.length === 0 ? (
+            <div className="p-4 text-sm text-muted-foreground bg-muted/50 rounded-md">
+              <p>No tables found in the database.</p>
+              <p className="mt-2">
+                Make sure your database has tables and the SQL migrations have
+                been applied.
+              </p>
+            </div>
+          ) : (
+            <TooltipProvider>
+              <Accordion
+                type="multiple"
+                value={expandedTables}
+                className="w-full"
+              >
+                {tables.map((table) => (
+                  <AccordionItem
+                    key={table.name}
+                    value={table.name}
                     className={cn(
-                      "px-3 hover:no-underline",
+                      "border rounded-md mb-2",
                       highlightedTable === table.name &&
-                        "text-primary font-medium",
+                        "border-primary bg-primary/5",
                     )}
                   >
-                    <div className="flex items-center gap-2">
-                      <Table className="h-4 w-4" />
-                      <span>{table.name}</span>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-3 pb-2">
-                    <div className="space-y-1">
-                      {table.columns.map((column) => (
-                        <Tooltip key={column.name}>
-                          <TooltipTrigger asChild>
-                            <div
-                              className={cn(
-                                "flex items-center justify-between text-sm p-1.5 rounded hover:bg-muted",
-                                column.isPrimary && "font-medium",
-                              )}
-                            >
-                              <div className="flex items-center gap-2">
-                                <AlignJustify className="h-3.5 w-3.5" />
-                                <span
-                                  className={
-                                    column.isPrimary ? "text-primary" : ""
-                                  }
-                                >
-                                  {column.name}
+                    <AccordionTrigger
+                      onClick={() => toggleTable(table.name)}
+                      className={cn(
+                        "px-3 hover:no-underline",
+                        highlightedTable === table.name &&
+                          "text-primary font-medium",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Table className="h-4 w-4" />
+                        <span>{table.name}</span>
+                      </div>
+                    </AccordionTrigger>
+                    <AccordionContent className="px-3 pb-2">
+                      <div className="space-y-1">
+                        {table.columns.map((column) => (
+                          <Tooltip key={column.name}>
+                            <TooltipTrigger asChild>
+                              <div
+                                className={cn(
+                                  "flex items-center justify-between text-sm p-1.5 rounded hover:bg-muted",
+                                  column.isPrimary && "font-medium",
+                                )}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <AlignJustify className="h-3.5 w-3.5" />
+                                  <span
+                                    className={
+                                      column.isPrimary ? "text-primary" : ""
+                                    }
+                                  >
+                                    {column.name}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">
+                                  {column.type}
                                 </span>
                               </div>
-                              <span className="text-xs text-muted-foreground">
-                                {column.type}
-                              </span>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            <div>
-                              <div className="font-medium">{column.name}</div>
-                              <div className="text-xs">Type: {column.type}</div>
-                              {column.isPrimary && (
-                                <div className="text-xs text-primary">
-                                  Primary Key
+                            </TooltipTrigger>
+                            <TooltipContent side="right">
+                              <div>
+                                <div className="font-medium">{column.name}</div>
+                                <div className="text-xs">
+                                  Type: {column.type}
                                 </div>
-                              )}
-                              {column.isForeign && (
-                                <div className="text-xs text-blue-500">
-                                  Foreign Key
-                                </div>
-                              )}
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
-          </TooltipProvider>
+                                {column.isPrimary && (
+                                  <div className="text-xs text-primary">
+                                    Primary Key
+                                  </div>
+                                )}
+                                {column.isForeign && (
+                                  <div className="text-xs text-blue-500">
+                                    Foreign Key
+                                  </div>
+                                )}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </TooltipProvider>
+          )}
         </div>
       </ScrollArea>
     </div>

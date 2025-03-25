@@ -1,7 +1,11 @@
 import React from "react";
 import QueryInterface from "@/components/QueryInterface";
-import { Metadata } from "next";
+import ConnectionStatus from "@/components/ConnectionStatus";
+import DatabaseTest from "@/components/DatabaseTest";
+import type { Metadata } from "next";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+// Use type import for Metadata to avoid client component export error
 export const metadata: Metadata = {
   title: "SQL Query Assistant",
   description: "Query SQL databases using natural language and voice input",
@@ -51,9 +55,24 @@ export default function Home() {
       </header>
 
       <div className="container mx-auto flex-1 p-4">
-        <div className="h-[calc(100vh-8rem)]">
-          <QueryInterface />
+        <div className="mb-4">
+          <ConnectionStatus />
         </div>
+
+        <Tabs defaultValue="query" className="w-full">
+          <TabsList className="mb-4">
+            <TabsTrigger value="query">Query Interface</TabsTrigger>
+            <TabsTrigger value="test">Connection Test</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="query" className="h-[calc(100vh-12rem)]">
+            <QueryInterface />
+          </TabsContent>
+
+          <TabsContent value="test">
+            <DatabaseTest />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <footer className="border-t bg-muted py-2 text-center text-sm text-muted-foreground">

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -10,6 +10,7 @@ import SchemaExplorer from "./SchemaExplorer";
 import QueryInputArea from "./QueryInputArea";
 import SqlPreview from "./SqlPreview";
 import ResultsDisplay from "./ResultsDisplay";
+import { supabase } from "@/lib/supabaseClient";
 
 interface QueryInterfaceProps {
   initialQuery?: string;
@@ -27,29 +28,6 @@ export default function QueryInterface({
     "table" | "list" | "value" | "empty"
   >("empty");
   const [error, setError] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<
-    "connected" | "disconnected" | "checking"
-  >("checking");
-
-  // Check connection status on component mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const { testConnection } = await import("@/lib/supabaseClient");
-        const result = await testConnection();
-        if (!result.connected) {
-          setError(
-            "Database connection failed: " + (result.error || "Unknown error"),
-          );
-        }
-      } catch (err: any) {
-        console.error("Error checking connection:", err);
-        setError("Failed to check database connection.");
-      }
-    };
-
-    checkConnection();
-  }, []);
 
   const handleSubmitQuery = async (queryText: string) => {
     setQuery(queryText);
@@ -57,106 +35,113 @@ export default function QueryInterface({
     setError(null);
 
     try {
-      // Import the necessary functions dynamically to avoid server-side issues
-      const { executeQuery, testConnection } = await import(
-        "@/lib/supabaseClient"
-      );
-
-      // Test connection first
-      const connectionTest = await testConnection();
-      setConnectionStatus(
-        connectionTest.connected ? "connected" : "disconnected",
-      );
-
-      if (!connectionTest.connected) {
-        throw new Error(
-          "Database connection failed: " +
-            (connectionTest.error || "Unknown error"),
-        );
-      }
-
-      // Generate SQL based on natural language query
+      // For now, we'll use a simple rule-based approach to generate SQL
+      // In a real app, this would be replaced with a call to Gemma or another NLP service
       let generatedSql = "";
       let detectedTable = "";
+      let resultFormat: "table" | "list" | "value" = "table";
 
-      // Enhanced SQL generation based on query text
-      if (queryText.toLowerCase().includes("user")) {
-        generatedSql = "SELECT * FROM users ORDER BY created_at DESC LIMIT 10;";
-        detectedTable = "users";
+      const query = queryText.toLowerCase();
+
+      // More robust pattern matching for natural language queries
+      if (query.includes("doctor")) {
+        if (query.includes("count") || query.includes("how many")) {
+          generatedSql = "SELECT COUNT(*) as count FROM doctors;";
+          resultFormat = "value";
+        } else if (query.includes("name") && query.includes("specialty")) {
+          generatedSql = "SELECT name, specialty FROM doctors LIMIT 20;";
+        } else {
+          generatedSql = "SELECT * FROM doctors LIMIT 10;";
+        }
+        detectedTable = "doctors";
+      } else if (query.includes("patient")) {
+        if (query.includes("count") || query.includes("how many")) {
+          generatedSql = "SELECT COUNT(*) as count FROM patients;";
+          resultFormat = "value";
+        } else if (query.includes("age")) {
+          generatedSql =
+            "SELECT name, age, gender FROM patients ORDER BY age DESC LIMIT 15;";
+        } else if (query.includes("gender")) {
+          generatedSql =
+            "SELECT gender, COUNT(*) as count FROM patients GROUP BY gender;";
+          resultFormat = "table";
+        } else {
+          generatedSql = "SELECT * FROM patients LIMIT 10;";
+        }
+        detectedTable = "patients";
+      } else if (query.includes("sample") || query.includes("sample_table")) {
+        if (query.includes("count") || query.includes("how many")) {
+          generatedSql = "SELECT COUNT(*) as count FROM sample_table;";
+          resultFormat = "value";
+        } else if (query.includes("email")) {
+          generatedSql = "SELECT name, email FROM sample_table LIMIT 15;";
+        } else {
+          generatedSql = "SELECT * FROM sample_table LIMIT 10;";
+        }
+        detectedTable = "sample_table";
       } else if (
-        queryText.toLowerCase().includes("product") &&
-        queryText.toLowerCase().includes("expensive")
+        query.includes("tables") ||
+        query.includes("schema") ||
+        query.includes("database structure")
       ) {
-        generatedSql =
-          "SELECT id, name, price, category_id FROM products ORDER BY price DESC LIMIT 5;";
-        detectedTable = "products";
-      } else if (queryText.toLowerCase().includes("product")) {
-        generatedSql =
-          "SELECT id, name, price, category_id FROM products WHERE price > 50 ORDER BY price DESC;";
-        detectedTable = "products";
-      } else if (queryText.toLowerCase().includes("categor")) {
-        generatedSql = "SELECT name, description FROM categories;";
-        detectedTable = "categories";
-      } else if (
-        queryText.toLowerCase().includes("order") &&
-        queryText.toLowerCase().includes("count")
-      ) {
-        generatedSql =
-          "SELECT status, COUNT(*) as count FROM orders GROUP BY status;";
-        detectedTable = "orders";
-      } else if (
-        queryText.toLowerCase().includes("order") &&
-        queryText.toLowerCase().includes("total")
-      ) {
-        generatedSql = "SELECT SUM(total) as total_revenue FROM orders;";
-        detectedTable = "orders";
-      } else if (queryText.toLowerCase().includes("order")) {
-        generatedSql =
-          "SELECT id, user_id, total, status FROM orders ORDER BY created_at DESC LIMIT 10;";
-        detectedTable = "orders";
+        generatedSql = `
+          SELECT 
+            table_name as name
+          FROM 
+            information_schema.tables 
+          WHERE 
+            table_schema = 'public' AND 
+            table_type = 'BASE TABLE'
+          ORDER BY 
+            table_name
+        `;
+        detectedTable = "";
+        resultFormat = "table";
       } else {
-        generatedSql = "SELECT * FROM users LIMIT 10;";
-        detectedTable = "users";
+        // Default query to show available tables
+        generatedSql = `
+          SELECT 
+            table_name as name,
+            (SELECT COUNT(*) FROM information_schema.columns WHERE table_name = t.table_name AND table_schema = 'public') as column_count
+          FROM 
+            information_schema.tables t
+          WHERE 
+            table_schema = 'public' AND 
+            table_type = 'BASE TABLE'
+          ORDER BY 
+            table_name
+        `;
+        detectedTable = "";
+        resultFormat = "table";
       }
 
       setSql(generatedSql);
       setHighlightedTable(detectedTable);
 
+      // Execute the SQL query using Supabase with better error handling
       try {
-        // Execute the SQL query using Supabase
-        const { data, error: queryError } = await executeQuery(generatedSql);
+        const { data, error: queryError } = await supabase.rpc("execute_sql", {
+          sql_query: generatedSql,
+        });
 
         if (queryError) {
-          throw new Error(queryError);
+          throw new Error(`Query execution error: ${queryError.message}`);
         }
 
-        // Set the results based on the query response
-        if (data && Array.isArray(data)) {
-          setResults(data);
-
-          // Determine result type based on data structure
-          if (data.length === 1 && Object.keys(data[0]).length === 1) {
-            setResultType("value");
-          } else if (data.length > 0 && Object.keys(data[0]).length <= 2) {
-            setResultType("list");
-          } else {
-            setResultType("table");
-          }
-        } else {
-          setResults([]);
-          setResultType("empty");
+        if (!data) {
+          throw new Error("No data returned from query");
         }
+
+        // Set the results and result type
+        setResultType(resultFormat);
+        setResults(data);
       } catch (queryErr: any) {
-        console.error("Error executing SQL query:", queryErr);
-        setError(queryErr.message || "Failed to execute SQL query");
-        setResults(null);
-        setResultType("empty");
+        console.error("SQL execution error:", queryErr);
+        throw new Error(`Failed to execute SQL: ${queryErr.message}`);
       }
     } catch (err: any) {
       setError(err.message || "Failed to process query. Please try again.");
       console.error("Error processing query:", err);
-      setResults(null);
-      setResultType("empty");
     } finally {
       setIsProcessing(false);
     }
@@ -164,7 +149,7 @@ export default function QueryInterface({
 
   const handleTableSelect = (tableName: string) => {
     setHighlightedTable(tableName);
-    // Generate a sample query for the selected table
+    // Optionally generate a sample query for the selected table
     const sampleQuery = `Show me all ${tableName}`;
     setQuery(sampleQuery);
   };
@@ -195,7 +180,6 @@ export default function QueryInterface({
               <QueryInputArea
                 onSubmitQuery={handleSubmitQuery}
                 isProcessing={isProcessing}
-                initialQuery={query}
               />
             </div>
 
