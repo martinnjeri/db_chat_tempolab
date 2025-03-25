@@ -48,22 +48,14 @@ export default function SchemaExplorer({
 				setLoading(true);
 				setError(null);
 
-				// First check if we can connect to Supabase
+				// First check if we can connect to Supabase using a simpler method
 				try {
-					const { data: connectionTest, error: connectionError } =
-						await supabase.rpc("execute_sql", {
-							sql_query: "SELECT 1 as connected;",
-						});
+					const { data: authData, error: authError } =
+						await supabase.auth.getSession();
 
-					if (connectionError) {
+					if (authError) {
 						throw new Error(
-							`Connection test failed: ${connectionError.message}`
-						);
-					}
-
-					if (!connectionTest || connectionTest.length === 0) {
-						throw new Error(
-							"Connection test returned empty result"
+							`Connection test failed: ${authError.message}`
 						);
 					}
 				} catch (connErr: any) {
@@ -73,135 +65,160 @@ export default function SchemaExplorer({
 					);
 				}
 
-				// Fetch table information from Supabase with better error handling
-				const { data: tablesData, error: tablesError } =
-					await supabase.rpc("execute_sql", {
-						sql_query: `
-            SELECT 
-              table_name as name
-            FROM 
-              information_schema.tables 
-            WHERE 
-              table_schema = 'public' AND 
-              table_type = 'BASE TABLE'
-            ORDER BY 
-              table_name
-          `,
-					});
+				// Use the execute_sql function with proper error handling
+				try {
+					const { data: tablesData, error: tablesError } =
+						await supabase.rpc("execute_sql", {
+							sql_query: `
+							SELECT 
+								table_name as name
+							FROM 
+								information_schema.tables 
+							WHERE 
+								table_schema = 'public' AND 
+								table_type = 'BASE TABLE'
+							ORDER BY 
+								table_name
+						`,
+						});
 
-				if (tablesError) {
-					throw new Error(
-						`Failed to fetch tables: ${tablesError.message}`
-					);
-				}
+					if (tablesError) {
+						throw new Error(
+							`Failed to fetch tables: ${tablesError.message}`
+						);
+					}
 
-				if (!tablesData || tablesData.length === 0) {
-					setTables([]);
-					setError(
-						"No tables found in the database. Make sure your migrations have been applied."
-					);
-					setLoading(false);
-					return;
-				}
+					if (!tablesData || tablesData.length === 0) {
+						setTables([]);
+						setError(
+							"No tables found in the database. Make sure your migrations have been applied."
+						);
+						setLoading(false);
+						return;
+					}
 
-				// For each table, fetch its columns with better error handling
-				const tablesWithColumns = await Promise.all(
-					tablesData.map(async (table: { name: string }) => {
-						try {
-							const { data: columnsData, error: columnsError } =
-								await supabase.rpc("execute_sql", {
+					// For each table, fetch its columns with better error handling
+					const tablesWithColumns = await Promise.all(
+						tablesData.map(async (table: { name: string }) => {
+							try {
+								const {
+									data: columnsData,
+									error: columnsError,
+								} = await supabase.rpc("execute_sql", {
 									sql_query: `
-                SELECT 
-                  column_name as name, 
-                  data_type as type,
-                  CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary,
-                  CASE WHEN fk.column_name IS NOT NULL THEN true ELSE false END as is_foreign
-                FROM 
-                  information_schema.columns c
-                LEFT JOIN (
-                  SELECT 
-                    kcu.column_name 
-                  FROM 
-                    information_schema.table_constraints tc
-                  JOIN 
-                    information_schema.key_column_usage kcu 
-                    ON tc.constraint_name = kcu.constraint_name
-                  WHERE 
-                    tc.constraint_type = 'PRIMARY KEY' AND 
-                    tc.table_name = '${table.name}'
-                ) pk ON c.column_name = pk.column_name
-                LEFT JOIN (
-                  SELECT 
-                    kcu.column_name 
-                  FROM 
-                    information_schema.table_constraints tc
-                  JOIN 
-                    information_schema.key_column_usage kcu 
-                    ON tc.constraint_name = kcu.constraint_name
-                  WHERE 
-                    tc.constraint_type = 'FOREIGN KEY' AND 
-                    tc.table_name = '${table.name}'
-                ) fk ON c.column_name = fk.column_name
-                WHERE 
-                  c.table_name = '${table.name}' AND 
-                  c.table_schema = 'public'
-                ORDER BY 
-                  ordinal_position
-              `,
+										SELECT 
+											c.column_name as name, 
+											c.data_type as type,
+											CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary,
+											CASE WHEN c.is_nullable = 'NO' THEN false ELSE true END as is_nullable
+										FROM 
+											information_schema.columns c
+										LEFT JOIN (
+											SELECT 
+												kcu.column_name 
+											FROM 
+												information_schema.table_constraints tc
+											JOIN 
+												information_schema.key_column_usage kcu 
+												ON tc.constraint_name = kcu.constraint_name
+											WHERE 
+												tc.constraint_type = 'PRIMARY KEY' AND 
+												tc.table_name = '${table.name}'
+										) pk ON c.column_name = pk.column_name
+										WHERE 
+											c.table_name = '${table.name}' AND 
+											c.table_schema = 'public'
+										ORDER BY 
+											c.ordinal_position
+									`,
 								});
 
-							if (columnsError) {
-								console.warn(
-									`Error fetching columns for ${table.name}:`,
-									columnsError
+								if (columnsError) {
+									console.warn(
+										`Error fetching columns for ${table.name}:`,
+										columnsError
+									);
+									return {
+										name: table.name,
+										columns: [],
+										error: columnsError.message,
+									};
+								}
+
+								// Process columns data
+								const columns = columnsData.map((col: any) => ({
+									name: col.name,
+									type: col.type,
+									isPrimaryKey: col.is_primary,
+									isNullable: col.is_nullable,
+									description: "", // Default value
+								}));
+
+								// Fetch foreign keys
+								const {
+									data: foreignKeysData,
+									error: foreignKeysError,
+								} = await supabase.rpc("execute_sql", {
+									sql_query: `
+										SELECT
+											kcu.column_name as column_name,
+											ccu.table_name as foreign_table,
+											ccu.column_name as foreign_column
+										FROM
+											information_schema.table_constraints tc
+										JOIN
+											information_schema.key_column_usage kcu
+											ON tc.constraint_name = kcu.constraint_name
+										JOIN
+											information_schema.constraint_column_usage ccu
+											ON tc.constraint_name = ccu.constraint_name
+										WHERE
+											tc.constraint_type = 'FOREIGN KEY' AND
+											tc.table_name = '${table.name}'
+									`,
+								});
+
+								const foreignKeys = foreignKeysError
+									? []
+									: foreignKeysData.map((fk: any) => ({
+											column: fk.column_name,
+											foreignTable: fk.foreign_table,
+											foreignColumn: fk.foreign_column,
+										}));
+
+								return {
+									name: table.name,
+									columns,
+									foreignKeys,
+								};
+							} catch (columnErr: any) {
+								console.error(
+									`Error processing columns for ${table.name}:`,
+									columnErr
 								);
 								return {
 									name: table.name,
 									columns: [],
-									error: columnsError.message,
+									error: columnErr.message,
 								};
 							}
+						})
+					);
 
-							// Handle the case where columnsData might be a single object or null
-							const columnsArray = Array.isArray(columnsData)
-								? columnsData
-								: columnsData
-									? [columnsData]
-									: [];
-
-							const columns = columnsArray.map((col: any) => ({
-								name: col.name,
-								type: col.type,
-								isPrimary: col.is_primary,
-								isForeign: col.is_foreign,
-							}));
-
-							return {
-								name: table.name,
-								columns,
-							};
-						} catch (columnErr: any) {
-							console.error(
-								`Error processing columns for ${table.name}:`,
-								columnErr
-							);
-							return {
-								name: table.name,
-								columns: [],
-								error: columnErr.message,
-							};
-						}
-					})
-				);
-
-				setTables(tablesWithColumns);
-				onTablesLoaded(tablesWithColumns);
+					setTables(tablesWithColumns);
+					onTablesLoaded(tablesWithColumns);
+				} catch (err: any) {
+					console.error("Error fetching schema:", err);
+					setError(err.message);
+					// Set empty tables in case of error
+					setTables([]);
+				} finally {
+					setLoading(false);
+				}
 			} catch (err: any) {
 				console.error("Error fetching schema:", err);
 				setError(err.message);
-				// Set empty tables in case of error
 				setTables([]);
-			} finally {
 				setLoading(false);
 			}
 		}
@@ -264,6 +281,62 @@ export default function SchemaExplorer({
 		</div>
 	);
 
+	const renderTable = (table: DatabaseTable) => (
+		<AccordionItem
+			key={table.name}
+			value={table.name}
+			className={cn(
+				"border rounded-lg mb-2",
+				highlightedTable === table.name && "border-primary"
+			)}>
+			<AccordionTrigger
+				onClick={() => toggleTable(table.name)}
+				className="px-4 hover:no-underline hover:bg-muted/50 [&[data-state=open]]:bg-muted/50">
+				<div className="flex items-center gap-2">
+					<Table className="h-4 w-4" />
+					<span>{table.name}</span>
+					<span className="text-xs text-muted-foreground ml-2">
+						({table.columns?.length || 0} columns)
+					</span>
+				</div>
+			</AccordionTrigger>
+			<AccordionContent className="px-4 pb-3">
+				<div className="space-y-2">
+					{table.columns && table.columns.length > 0 ? (
+						<div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs font-medium text-muted-foreground mb-1">
+							<div>Column</div>
+							<div>Type</div>
+						</div>
+					) : null}
+					{table.columns?.map((column) => (
+						<div
+							key={`${table.name}-${column.name}`}
+							className="grid grid-cols-2 gap-x-2 text-sm border-b border-muted pb-1">
+							<div className="font-medium flex items-center gap-1">
+								{column.isPrimaryKey && (
+									<span className="text-primary text-xs">
+										🔑
+									</span>
+								)}
+								{table.foreignKeys?.some(
+									(fk) => fk.column === column.name
+								) && (
+									<span className="text-blue-500 text-xs">
+										🔗
+									</span>
+								)}
+								<span className="truncate">{column.name}</span>
+							</div>
+							<div className="text-muted-foreground truncate">
+								{column.type}
+							</div>
+						</div>
+					))}
+				</div>
+			</AccordionContent>
+		</AccordionItem>
+	);
+
 	return (
 		<div className="w-full h-full bg-background border-r">
 			<div className="p-4 border-b">
@@ -292,94 +365,7 @@ export default function SchemaExplorer({
 								type="multiple"
 								value={expandedTables}
 								className="w-full">
-								{tables.map((table) => (
-									<AccordionItem
-										key={table.name}
-										value={table.name}
-										className={cn(
-											"border rounded-md mb-2",
-											highlightedTable === table.name &&
-												"border-primary bg-primary/5"
-										)}>
-										<AccordionTrigger
-											onClick={() =>
-												toggleTable(table.name)
-											}
-											className={cn(
-												"px-3 hover:no-underline",
-												highlightedTable ===
-													table.name &&
-													"text-primary font-medium"
-											)}>
-											<div className="flex items-center gap-2">
-												<Table className="h-4 w-4" />
-												<span>{table.name}</span>
-											</div>
-										</AccordionTrigger>
-										<AccordionContent className="px-3 pb-2">
-											<div className="space-y-1">
-												{table.columns.map((column) => (
-													<Tooltip key={column.name}>
-														<TooltipTrigger asChild>
-															<div
-																className={cn(
-																	"flex items-center justify-between text-sm p-1.5 rounded hover:bg-muted",
-																	column.isPrimary &&
-																		"font-medium"
-																)}>
-																<div className="flex items-center gap-2">
-																	<AlignJustify className="h-3.5 w-3.5" />
-																	<span
-																		className={
-																			column.isPrimary
-																				? "text-primary"
-																				: ""
-																		}>
-																		{
-																			column.name
-																		}
-																	</span>
-																</div>
-																<span className="text-xs text-muted-foreground">
-																	{
-																		column.type
-																	}
-																</span>
-															</div>
-														</TooltipTrigger>
-														<TooltipContent side="right">
-															<div>
-																<div className="font-medium">
-																	{
-																		column.name
-																	}
-																</div>
-																<div className="text-xs">
-																	Type:{" "}
-																	{
-																		column.type
-																	}
-																</div>
-																{column.isPrimary && (
-																	<div className="text-xs text-primary">
-																		Primary
-																		Key
-																	</div>
-																)}
-																{column.isForeign && (
-																	<div className="text-xs text-blue-500">
-																		Foreign
-																		Key
-																	</div>
-																)}
-															</div>
-														</TooltipContent>
-													</Tooltip>
-												))}
-											</div>
-										</AccordionContent>
-									</AccordionItem>
-								))}
+								{tables.map((table) => renderTable(table))}
 							</Accordion>
 						</TooltipProvider>
 					)}

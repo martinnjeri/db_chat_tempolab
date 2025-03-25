@@ -1,19 +1,157 @@
-[0]).length === 1
-				) {
-					resultFormat = "value";
-				}
+"use client";
 
-				setResultType(resultFormat);
-				setResults(data);
-			} catch (queryErr: any) {
-				console.error("SQL execution error:", queryErr);
-				throw new Error(`Failed to execute SQL: ${queryErr.message}`);
+import React, { useState, useEffect } from "react";
+import {
+	ResizableHandle,
+	ResizablePanel,
+	ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import SchemaExplorer from "./SchemaExplorer";
+import QueryInputArea from "./QueryInputArea";
+import SqlPreview from "./SqlPreview";
+import ResultsDisplay from "./ResultsDisplay";
+import { supabase } from "@/lib/supabaseClient";
+import { NLPProcessor } from "@/lib/nlpProcessor";
+import { DatabaseTable } from "@/types/database";
+
+interface QueryInterfaceProps {
+	initialQuery?: string;
+}
+
+interface QueryResult {
+	data: any[] | null;
+	error: any;
+}
+
+export default function QueryInterface({
+	initialQuery = "",
+}: QueryInterfaceProps) {
+	const [query, setQuery] = useState<string>(initialQuery);
+	const [sql, setSql] = useState<string>("");
+	const [isProcessing, setIsProcessing] = useState<boolean>(false);
+	const [highlightedTable, setHighlightedTable] = useState<string>("");
+	const [results, setResults] = useState<any[] | null>(null);
+	const [resultType, setResultType] = useState<
+		"table" | "list" | "value" | "empty"
+	>("empty");
+	const [error, setError] = useState<string | null>(null);
+	const [tables, setTables] = useState<DatabaseTable[]>([]);
+	const [nlpProcessor, setNlpProcessor] = useState<NLPProcessor | null>(null);
+	const [explanation, setExplanation] = useState<string>("");
+
+	// Initialize NLP processor when tables are loaded
+	useEffect(() => {
+		if (tables.length > 0) {
+			const processor = new NLPProcessor(tables);
+			setNlpProcessor(processor);
+
+			// Check if Gemini is configured
+			if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
+				setError(
+					"Warning: Gemini API key not configured. Using fallback approach."
+				);
 			}
-		} catch (err: any) {
-			setError(
-				err.message || "Failed to process query. Please try again."
-			);
-			console.error("Error processing query:", err);
+		}
+	}, [tables]);
+
+	const executeQuery = async (sqlQuery: string): Promise<QueryResult> => {
+		try {
+			const { data, error } = await supabase.rpc("execute_sql", {
+				sql_query: sqlQuery,
+			});
+
+			if (error) throw error;
+
+			return { data, error: null };
+		} catch (error: any) {
+			console.error("Query execution error:", error);
+			return { data: null, error };
+		}
+	};
+
+	const setQueryResults = (result: QueryResult) => {
+		if (result.error) {
+			setError(result.error.message);
+			setResults(null);
+			setResultType("empty");
+			return;
+		}
+
+		if (!result.data || result.data.length === 0) {
+			setResults(null);
+			setResultType("empty");
+			return;
+		}
+
+		setResults(result.data);
+
+		// Determine result type
+		if (Array.isArray(result.data)) {
+			if (
+				result.data.length === 1 &&
+				Object.keys(result.data[0]).length === 1
+			) {
+				setResultType("value");
+			} else {
+				setResultType("table");
+			}
+		} else {
+			setResultType("value");
+		}
+	};
+
+	const setQueryExplanation = (text: string) => {
+		setExplanation(text);
+	};
+
+	const handleSubmitQuery = async (queryText: string) => {
+		setQuery(queryText);
+		setIsProcessing(true);
+		setError(null);
+
+		try {
+			if (!nlpProcessor) {
+				throw new Error(
+					"Database schema not loaded yet. Please try again."
+				);
+			}
+
+			// Process the natural language query
+			let generatedSql = "";
+			try {
+				generatedSql = await nlpProcessor.processQuery(queryText);
+			} catch (nlpError: any) {
+				throw new Error(`Failed to process query: ${nlpError.message}`);
+			}
+
+			setSql(generatedSql);
+
+			// Execute the SQL query
+			try {
+				const result = await executeQuery(generatedSql);
+				setQueryResults(result);
+
+				// Get explanation
+				try {
+					const explanation = await nlpProcessor.explainQuery(
+						queryText,
+						generatedSql
+					);
+					if (typeof explanation === "string") {
+						setQueryExplanation(explanation);
+					}
+				} catch (explainError) {
+					console.warn(
+						"Failed to generate query explanation:",
+						explainError
+					);
+				}
+			} catch (dbError: any) {
+				throw new Error(`Database error: ${dbError.message}`);
+			}
+		} catch (error: any) {
+			setError(error.message);
+			console.error("Query error:", error);
 		} finally {
 			setIsProcessing(false);
 		}
@@ -71,6 +209,7 @@
 								error={error}
 								loading={isProcessing}
 								resultType={resultType}
+								explanation={explanation}
 							/>
 						</div>
 					</div>
