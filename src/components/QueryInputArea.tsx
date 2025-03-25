@@ -3,13 +3,8 @@
 import React, { useState } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Mic, Send, Loader2 } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip";
+import { Send, Loader2 } from "lucide-react";
+import VoiceInputButton from "./VoiceInputButton";
 
 interface QueryInputAreaProps {
   onSubmitQuery?: (query: string) => void;
@@ -21,7 +16,7 @@ const QueryInputArea = ({
   isProcessing = false,
 }: QueryInputAreaProps) => {
   const [query, setQuery] = useState<string>("");
-  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState<boolean>(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,56 +25,37 @@ const QueryInputArea = ({
     }
   };
 
-  const startVoiceRecording = () => {
-    // This would be implemented with the Web Speech API in a real application
-    setIsRecording(true);
-
-    // Simulate voice recording for 3 seconds
-    setTimeout(() => {
-      setIsRecording(false);
-      // Simulate transcribed text
-      setQuery("Show me all customers who made purchases last month");
-    }, 3000);
+  const handleVoiceInput = (transcript: string) => {
+    setQuery(transcript);
+    setIsListening(false);
   };
 
   return (
     <div className="w-full bg-card p-4 rounded-md shadow-sm border border-border">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <Input
-            type="text"
-            placeholder="Ask a question about your database..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="flex-1"
-            disabled={isProcessing || isRecording}
-          />
-
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={startVoiceRecording}
-                  disabled={isProcessing || isRecording}
-                  className={isRecording ? "bg-red-100 border-red-500" : ""}
-                >
-                  <Mic
-                    className={isRecording ? "text-red-500 animate-pulse" : ""}
-                  />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Record voice query</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+        <div className="flex flex-col sm:flex-row items-center gap-2">
+          <div className="relative w-full">
+            <Input
+              type="text"
+              placeholder="Ask a question about your database..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="flex-1 pr-10"
+              disabled={isProcessing || isListening}
+            />
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+              <VoiceInputButton
+                onTranscript={handleVoiceInput}
+                disabled={isProcessing}
+                className="h-8 w-8"
+              />
+            </div>
+          </div>
 
           <Button
             type="submit"
-            disabled={!query.trim() || isProcessing || isRecording}
+            disabled={!query.trim() || isProcessing || isListening}
+            className="w-full sm:w-auto mt-2 sm:mt-0"
           >
             {isProcessing ? (
               <>
@@ -95,7 +71,7 @@ const QueryInputArea = ({
           </Button>
         </div>
 
-        {isRecording && (
+        {isListening && (
           <div className="text-sm text-center text-muted-foreground animate-pulse">
             Listening... Speak your query clearly
           </div>
