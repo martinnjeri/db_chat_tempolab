@@ -110,7 +110,7 @@ export default function DoctorManagement() {
   };
 
   const handleCreateDoctor = async () => {
-    if (!doctorName.trim() || !doctorSpecialty.trim()) {
+    if (!doctorName?.trim() || !doctorSpecialty?.trim()) {
       setError("Name and specialty are required");
       return;
     }
@@ -149,7 +149,7 @@ export default function DoctorManagement() {
 
   const handleEditDoctor = async () => {
     if (!currentDoctor) return;
-    if (!doctorName.trim() || !doctorSpecialty.trim()) {
+    if (!doctorName?.trim() || !doctorSpecialty?.trim()) {
       setError("Name and specialty are required");
       return;
     }
