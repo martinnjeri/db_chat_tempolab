@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { fetchOrganizations } from "@/lib/supabaseClient";
+import {
+	fetchOrganizations,
+	getCurrentOrganization,
+} from "@/lib/supabaseClient";
 import { Organization } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
