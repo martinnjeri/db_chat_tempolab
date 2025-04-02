@@ -95,7 +95,7 @@ export default function OrganizationManagement() {
         .from("organizations")
         .insert({
           name: orgName.trim(),
-          description: orgDescription.trim() || null,
+          description: orgDescription ? orgDescription.trim() : null,
         })
         .select();
 
@@ -131,7 +131,7 @@ export default function OrganizationManagement() {
         .from("organizations")
         .update({
           name: orgName.trim(),
-          description: orgDescription.trim() || null,
+          description: orgDescription ? orgDescription.trim() : null,
         })
         .eq("id", currentOrg.id);
 

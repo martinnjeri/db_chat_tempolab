@@ -71,7 +71,7 @@ export default function DoctorManagement() {
   const [doctorName, setDoctorName] = useState("");
   const [doctorSpecialty, setDoctorSpecialty] = useState("");
   const [doctorContact, setDoctorContact] = useState("");
-  const [doctorOrgId, setDoctorOrgId] = useState<string>("");
+  const [doctorOrgId, setDoctorOrgId] = useState<string>("none");
   const [currentDoctor, setCurrentDoctor] = useState<Doctor | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -126,7 +126,8 @@ export default function DoctorManagement() {
           name: doctorName.trim(),
           specialty: doctorSpecialty.trim(),
           contact_number: doctorContact.trim() || null,
-          organization_id: doctorOrgId ? parseInt(doctorOrgId, 10) : null,
+          organization_id:
+            doctorOrgId !== "none" ? parseInt(doctorOrgId, 10) : null,
         })
         .select();
 
@@ -164,7 +165,8 @@ export default function DoctorManagement() {
           name: doctorName.trim(),
           specialty: doctorSpecialty.trim(),
           contact_number: doctorContact.trim() || null,
-          organization_id: doctorOrgId ? parseInt(doctorOrgId, 10) : null,
+          organization_id:
+            doctorOrgId !== "none" ? parseInt(doctorOrgId, 10) : null,
         })
         .eq("id", currentDoctor.id);
 
@@ -219,7 +221,7 @@ export default function DoctorManagement() {
     setDoctorSpecialty(doctor.specialty);
     setDoctorContact(doctor.contact_number || "");
     setDoctorOrgId(
-      doctor.organization_id ? doctor.organization_id.toString() : "",
+      doctor.organization_id ? doctor.organization_id.toString() : "none",
     );
     setIsEditDialogOpen(true);
   };
@@ -233,7 +235,7 @@ export default function DoctorManagement() {
     setDoctorName("");
     setDoctorSpecialty("");
     setDoctorContact("");
-    setDoctorOrgId("");
+    setDoctorOrgId("none");
     setCurrentDoctor(null);
     setError(null);
   };
@@ -376,7 +378,7 @@ export default function DoctorManagement() {
                   <SelectValue placeholder="Select organization" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {organizations.map((org) => (
                     <SelectItem key={org.id} value={org.id.toString()}>
                       {org.name}
@@ -453,7 +455,7 @@ export default function DoctorManagement() {
                   <SelectValue placeholder="Select organization" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {organizations.map((org) => (
                     <SelectItem key={org.id} value={org.id.toString()}>
                       {org.name}
