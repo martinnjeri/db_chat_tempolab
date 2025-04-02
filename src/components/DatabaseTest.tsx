@@ -20,6 +20,7 @@ export default function DatabaseTest() {
         "execute_sql",
         {
           sql_query: "SELECT 'test' as result;",
+          org_id: null,
         },
       );
 
@@ -46,6 +47,7 @@ export default function DatabaseTest() {
           ORDER BY 
             table_name
         `,
+          org_id: null,
         },
       );
 
@@ -70,6 +72,7 @@ export default function DatabaseTest() {
               "execute_sql",
               {
                 sql_query: `SELECT * FROM "${table.name}" LIMIT 1`,
+                org_id: null,
               },
             );
 

@@ -52,6 +52,7 @@ export async function checkConnection() {
     // Try a simple RPC call instead of querying a specific table
     const { data, error } = await supabase.rpc("execute_sql", {
       sql_query: "SELECT 1 as connected",
+      org_id: null,
     });
 
     const newConnectionStatus = !error;
@@ -129,7 +130,7 @@ export async function executeQuery(sqlQuery: string) {
     // Add proper error handling for JSON parsing
     const { data, error } = await supabase.rpc("execute_sql", {
       sql_query: sqlQuery,
-      org_id: currentOrganizationId,
+      org_id: currentOrganizationId || null,
     });
 
     if (error) {
