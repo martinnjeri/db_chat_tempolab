@@ -70,16 +70,17 @@ export default function SchemaExplorer({
 					const { data: tablesData, error: tablesError } =
 						await supabase.rpc("execute_sql", {
 							sql_query: `
-							SELECT 
+							SELECT
 								table_name as name
-							FROM 
-								information_schema.tables 
-							WHERE 
-								table_schema = 'public' AND 
+							FROM
+								information_schema.tables
+							WHERE
+								table_schema = 'public' AND
 								table_type = 'BASE TABLE'
-							ORDER BY 
+							ORDER BY
 								table_name
 						`,
+							org_id: null,
 						});
 
 					if (tablesError) {
@@ -106,31 +107,32 @@ export default function SchemaExplorer({
 									error: columnsError,
 								} = await supabase.rpc("execute_sql", {
 									sql_query: `
-										SELECT 
-											c.column_name as name, 
+										SELECT
+											c.column_name as name,
 											c.data_type as type,
 											CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary,
 											CASE WHEN c.is_nullable = 'NO' THEN false ELSE true END as is_nullable
-										FROM 
+										FROM
 											information_schema.columns c
 										LEFT JOIN (
-											SELECT 
-												kcu.column_name 
-											FROM 
+											SELECT
+												kcu.column_name
+											FROM
 												information_schema.table_constraints tc
-											JOIN 
-												information_schema.key_column_usage kcu 
+											JOIN
+												information_schema.key_column_usage kcu
 												ON tc.constraint_name = kcu.constraint_name
-											WHERE 
-												tc.constraint_type = 'PRIMARY KEY' AND 
+											WHERE
+												tc.constraint_type = 'PRIMARY KEY' AND
 												tc.table_name = '${table.name}'
 										) pk ON c.column_name = pk.column_name
-										WHERE 
-											c.table_name = '${table.name}' AND 
+										WHERE
+											c.table_name = '${table.name}' AND
 											c.table_schema = 'public'
-										ORDER BY 
+										ORDER BY
 											c.ordinal_position
 									`,
+									org_id: null,
 								});
 
 								if (columnsError) {
@@ -176,6 +178,7 @@ export default function SchemaExplorer({
 											tc.constraint_type = 'FOREIGN KEY' AND
 											tc.table_name = '${table.name}'
 									`,
+									org_id: null,
 								});
 
 								const foreignKeys = foreignKeysError
@@ -267,7 +270,13 @@ export default function SchemaExplorer({
 		<div className="flex items-center justify-center h-full">
 			<div className="flex flex-col items-center space-y-4">
 				<Database className="h-8 w-8 text-destructive" />
-				<p className="text-sm text-destructive">{error}</p>
+				<p className="text-sm text-destructive font-medium">Error:</p>
+				<p className="text-sm text-destructive text-center px-4">
+					{error}
+				</p>
+				<p className="text-xs text-muted-foreground text-center px-4">
+					Try using the Connection Test tab to diagnose the issue.
+				</p>
 			</div>
 		</div>
 	);
