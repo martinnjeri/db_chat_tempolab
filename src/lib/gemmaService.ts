@@ -49,12 +49,17 @@ export class GemmaService {
 
 			const prompt = `
 				You are a SQL query generator. Convert the following natural language query to SQL.
-				
+
 				Database Schema:
 				${schemaContext}
-				
+
+				Important Guidelines:
+				1. When querying the doctors table, always include the organization name by joining with the organizations table.
+				2. Use LEFT JOIN organizations ON doctors.organization_id = organizations.id when querying doctors.
+				3. Include organizations.name as organization_name in the SELECT clause when querying doctors.
+
 				Natural Language Query: "${naturalLanguageQuery}"
-				
+
 				Return only the SQL query without any explanation or markdown formatting.
 			`;
 
@@ -88,9 +93,9 @@ export class GemmaService {
 		try {
 			const prompt = `
 				Explain the following SQL query in simple terms:
-				
+
 				SQL Query: ${sqlQuery}
-				
+
 				Provide a concise explanation that a non-technical person would understand.
 			`;
 
@@ -153,11 +158,11 @@ export class GemmaService {
 		try {
 			const prompt = `
 				Given this natural language query: "${naturalLanguageQuery}"
-				
+
 				Provide a brief, clear explanation of what you understand the user is asking for.
 				Write in first person as if you're explaining what you understood from their query.
 				Keep it to 1-2 sentences maximum.
-				
+
 				Example:
 				Query: "How many patients visited in January?"
 				Response: "I understand you want to know the total count of patient visits during January."

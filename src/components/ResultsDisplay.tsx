@@ -118,7 +118,10 @@ export default function ResultsDisplay({
 							<TableRow key={rowIndex}>
 								{columns.map((column) => (
 									<TableCell key={`${rowIndex}-${column}`}>
-										{row[column]}
+										{column === "organization_id" &&
+										row["organization_name"]
+											? `${row[column]} (${row["organization_name"]})`
+											: row[column]}
 									</TableCell>
 								))}
 							</TableRow>
