@@ -1,7 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { fetchOrganizations } from "@/lib/supabaseClient";
+import {
+  fetchOrganizations,
+  getCurrentOrganization,
+} from "@/lib/supabaseClient";
 import { Organization } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,21 +77,36 @@ export default function DoctorManagement() {
   const [doctorOrgId, setDoctorOrgId] = useState<string>("none");
   const [currentDoctor, setCurrentDoctor] = useState<Doctor | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedOrgId, setSelectedOrgId] = useState<number | null>(
+    getCurrentOrganization(),
+  );
 
-  // Fetch doctors and organizations on component mount
+  // Fetch doctors and organizations on component mount or when selected organization changes
   useEffect(() => {
     loadDoctors();
     loadOrganizations();
+  }, [selectedOrgId]);
+
+  // Update selected organization when it changes globally
+  useEffect(() => {
+    const orgId = getCurrentOrganization();
+    if (orgId !== selectedOrgId) {
+      setSelectedOrgId(orgId);
+    }
   }, []);
 
   const loadDoctors = async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
-        .from("doctors")
-        .select("*")
-        .order("name");
+      let query = supabase.from("doctors").select("*").order("name");
+
+      // Filter by organization if one is selected
+      if (selectedOrgId) {
+        query = query.eq("organization_id", selectedOrgId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setDoctors(data || []);
@@ -110,7 +128,12 @@ export default function DoctorManagement() {
   };
 
   const handleCreateDoctor = async () => {
-    if (!doctorName?.trim() || !doctorSpecialty?.trim()) {
+    if (
+      !doctorName ||
+      !doctorSpecialty ||
+      doctorName.trim() === "" ||
+      doctorSpecialty.trim() === ""
+    ) {
       setError("Name and specialty are required");
       return;
     }
@@ -149,7 +172,12 @@ export default function DoctorManagement() {
 
   const handleEditDoctor = async () => {
     if (!currentDoctor) return;
-    if (!doctorName?.trim() || !doctorSpecialty?.trim()) {
+    if (
+      !doctorName ||
+      !doctorSpecialty ||
+      doctorName.trim() === "" ||
+      doctorSpecialty.trim() === ""
+    ) {
       setError("Name and specialty are required");
       return;
     }
