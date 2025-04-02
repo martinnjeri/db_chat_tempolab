@@ -112,6 +112,8 @@ export async function attemptReconnect() {
 
 // Current organization context
 let currentOrganizationId: number | null = null;
+let selectedOrganizationIds: number[] = [];
+let selectedDoctorIds: number[] = [];
 
 // Set the current organization context
 export function setCurrentOrganization(orgId: number | null) {
@@ -124,12 +126,87 @@ export function getCurrentOrganization() {
   return currentOrganizationId;
 }
 
-// Helper function to execute SQL queries with reconnection logic and organization filtering
+// Set selected organizations
+export function setSelectedOrganizations(orgIds: number[]) {
+  selectedOrganizationIds = orgIds;
+  console.log(`Set selected organizations to: ${orgIds.join(", ")}`);
+}
+
+// Get selected organizations
+export function getSelectedOrganizations() {
+  return selectedOrganizationIds;
+}
+
+// Set selected doctors
+export function setSelectedDoctors(doctorIds: number[]) {
+  selectedDoctorIds = doctorIds;
+  console.log(`Set selected doctors to: ${doctorIds.join(", ")}`);
+}
+
+// Get selected doctors
+export function getSelectedDoctors() {
+  return selectedDoctorIds;
+}
+
+// Helper function to execute SQL queries with reconnection logic and filtering
 export async function executeQuery(sqlQuery: string) {
   try {
-    // Add proper error handling for JSON parsing
+    // Modify the SQL query to include filters for organizations and doctors if they are selected
+    let modifiedQuery = sqlQuery;
+
+    // Only apply filters if they are selected and the query is a SELECT statement
+    if (
+      (selectedOrganizationIds.length > 0 || selectedDoctorIds.length > 0) &&
+      sqlQuery.trim().toLowerCase().startsWith("select")
+    ) {
+      // Check if the query already has a WHERE clause
+      const hasWhere = /\bwhere\b/i.test(sqlQuery);
+
+      // Add organization filter if organizations are selected
+      if (selectedOrganizationIds.length > 0) {
+        const orgFilter = `organizations.id IN (${selectedOrganizationIds.join(", ")})`;
+
+        if (hasWhere) {
+          // Add to existing WHERE clause
+          modifiedQuery = modifiedQuery.replace(
+            /\bwhere\b/i,
+            `WHERE (${orgFilter}) AND `,
+          );
+        } else if (/\bfrom\b.*\borganizations\b/i.test(sqlQuery)) {
+          // Add WHERE clause after FROM if it's querying the organizations table
+          modifiedQuery = modifiedQuery.replace(
+            /(\bfrom\b.*?\borganizations\b.*?)(?:\b(group|order|limit|having)\b|$)/i,
+            `$1 WHERE ${orgFilter} $2`,
+          );
+        }
+      }
+
+      // Add doctor filter if doctors are selected
+      if (selectedDoctorIds.length > 0) {
+        const doctorFilter = `doctors.id IN (${selectedDoctorIds.join(", ")})`;
+
+        if (/\bwhere\b/i.test(modifiedQuery)) {
+          // Add to existing WHERE clause
+          modifiedQuery = modifiedQuery.replace(
+            /\bwhere\b(.*?)(?:\b(group|order|limit|having)\b|$)/i,
+            `WHERE$1 AND (${doctorFilter}) $2`,
+          );
+        } else if (/\bfrom\b.*\bdoctors\b/i.test(sqlQuery)) {
+          // Add WHERE clause after FROM if it's querying the doctors table
+          modifiedQuery = modifiedQuery.replace(
+            /(\bfrom\b.*?\bdoctors\b.*?)(?:\b(group|order|limit|having)\b|$)/i,
+            `$1 WHERE ${doctorFilter} $2`,
+          );
+        }
+      }
+    }
+
+    console.log("Original query:", sqlQuery);
+    console.log("Modified query:", modifiedQuery);
+
+    // Execute the modified query
     const { data, error } = await supabase.rpc("execute_sql", {
-      sql_query: sqlQuery,
+      sql_query: modifiedQuery,
       org_id: currentOrganizationId || null,
     });
 
