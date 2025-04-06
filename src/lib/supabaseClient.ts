@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { enhanceDoctorQueries } from "./sqlEnhancer";
+import { enhancePatientQueries } from "./patientEnhancer";
 
 // Ensure we have the required environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -176,8 +177,9 @@ export function getSelectedDoctors() {
 // Helper function to execute SQL queries with reconnection logic and filtering
 export async function executeQuery(sqlQuery: string) {
 	try {
-		// Enhance the query to include organization names for doctor queries
+		// Enhance the query to include organization names for doctor queries and doctor names for patient queries
 		let modifiedQuery = enhanceDoctorQueries(sqlQuery);
+		modifiedQuery = enhancePatientQueries(modifiedQuery);
 
 		// Modify the SQL query to include filters for organizations and doctors if they are selected
 
